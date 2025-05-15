@@ -29,4 +29,31 @@ The project uses the following environment variables for configuration:
 3. **Completion**:
    - The job concludes with a `Completed` state, and an HTTP response is returned to the client.
 
+### Fetching Custom Status
+
+You can query the current custom status (customStatus below) of a job instance via the Durable Functions HTTP API:
+
+```http
+/runtime/webhooks/durabletask/instances/{jobName}
+```
+
+with the response similar to:
+
+```json
+{
+  "name": "AsyncJobOrchestrator",
+  "instanceId": "job-gb4711",
+  "runtimeStatus": "Running",
+  "input": {
+    "ThirdPartyJobId": "d349c562-53ea-41ef-a1b9-8f0d4be22e4f",
+    "QueuedDuration": 20,
+    "InProgressDuration": 30
+  },
+  "customStatus": "Queued",
+  "output": null,
+  "createdTime": "2025-05-15T14:41:12Z",
+  "lastUpdatedTime": "2025-05-15T14:41:12Z"
+}
+```
+
 AsyncJob is licensed under the MIT License, allowing for flexible use and modification in both personal and commercial projects.
