@@ -1,2 +1,2 @@
 # AsyncJob
-lightweight async job implemetation
+lightweight async job implementation
