@@ -80,7 +80,8 @@ public static class AsyncJob
             // Optionally log or handle JSON parse errors
         }
         var httpResponse = req.CreateResponse(HttpStatusCode.OK);
-        var json = System.Text.Json.JsonSerializer.Serialize(new { jobStatus = customStatus });
+        string json = System.Text.Json.JsonSerializer.Serialize(new { jobStatus = customStatus });
+        logger.LogInformation("Job {JobId} status: {Status}", instanceId, json);
         await httpResponse.WriteStringAsync(json);
         return httpResponse;
     }
