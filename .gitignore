@@ -269,3 +269,6 @@ __blob*
 __table*
 __queue*
 AzuriteConfig*
+
+#remote testing 
+remote_test.http

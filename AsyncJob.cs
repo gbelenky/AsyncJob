@@ -1,3 +1,5 @@
+using System.Net;
+using System.Security.Policy;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.DurableTask;
@@ -43,6 +45,46 @@ public static class AsyncJob
 
         return outputs;
     }
+
+
+
+
+    // add a function to retuen the status of the job
+    [Function(nameof(AsyncJobStatus))]
+    public static async Task<HttpResponseData> AsyncJobStatus(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "job-status/{jobName}")] HttpRequestData req,
+        [DurableClient] DurableTaskClient client,
+        FunctionContext executionContext, string jobName)
+    {
+        ILogger logger = executionContext.GetLogger("AsyncJobStatus");
+        string instanceId = $"job-{jobName}";
+
+        var host = req.Url.Host;
+
+        // Build the Durable Functions status URL correctly using string interpolation
+        string statusUrl = $"{req.Url.Scheme}://{host}:{req.Url.Port}/runtime/webhooks/durabletask/instances/{instanceId}";
+        HttpClient httpClient = new HttpClient();
+        var response = await httpClient.GetAsync(statusUrl);
+        var responseContent = await response.Content.ReadAsStringAsync();
+        string? customStatus = null;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(responseContent);
+            if (doc.RootElement.TryGetProperty("customStatus", out var statusProp))
+            {
+                customStatus = statusProp.GetString();
+            }
+        }
+        catch
+        {
+            // Optionally log or handle JSON parse errors
+        }
+        var httpResponse = req.CreateResponse(HttpStatusCode.OK);
+        var json = System.Text.Json.JsonSerializer.Serialize(new { jobStatus = customStatus });
+        await httpResponse.WriteStringAsync(json);
+        return httpResponse;
+    }
+
 
     [Function("AsyncJobTrigger")]
     public static async Task<HttpResponseData> AsyncJobTrigger(
