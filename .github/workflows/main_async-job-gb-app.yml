@@ -22,22 +22,26 @@ jobs:
 
     steps:
       - name: 'Checkout GitHub Action'
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Setup DotNet ${{ env.DOTNET_VERSION }} Environment
-        uses: actions/setup-dotnet@v3
+        uses: actions/setup-dotnet@v1
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
-      - name: 'Build'
-        run: dotnet publish --configuration Release --output ./output
+      - name: 'Resolve Project Dependencies Using Dotnet'
+        shell: pwsh
+        run: |
+          pushd './${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}'
+          dotnet build --configuration Release --output ./output
+          popd
       
       - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E1EF897AE64D45C2BD51AF1D96992B6C }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_BEA4CF1B5223483BA187B5F907986C75 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_E108FF24C5D7415486E6B4CB195B587E }}
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_8401DE210E27482BA23EB2A518F7AF31 }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_C7ADB75E3AF6483AA87E06C7C4C58D37 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_B299CD2A2DD042EEAF3932C07F2D47AD }}
 
       - name: 'Run Azure Functions Action'
         uses: Azure/functions-action@v1
