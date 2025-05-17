@@ -12,7 +12,7 @@ lightweight async job implementation
 2. **Durable Task Framework**: The project employs the Durable Task framework for managing long-running workflows and state persistence.
 3. **Customizable Durations**: Job states such as `Queued` and `InProgress` can be customized using environment variables.
 4. **State Management**: Provides detailed logging and state transitions for each job instance.
-5. **HTTP Trigger Support**: The `AsyncJobTrigger` function allows initiating jobs via HTTP requests.
+5. **HTTP Trigger Support**: The `JobStartTrigger` function allows initiating jobs via HTTP requests.
 
 ### Environment Variables:
 The project uses the following environment variables for configuration:
@@ -37,11 +37,11 @@ You can query the current status of a job instance using the AsyncJobStatus HTTP
 /job-status/{jobName}
 ```
 
-This endpoint returns the current status and details of the specified job instance. The response includes the job's name, instance ID, runtime status, input parameters, custom status, output, and timestamps. Example response:
+This endpoint returns the current status of the specified job instance. Example response:
 
 ```json
 {
-  "jobStatus": "Queued"
+  "status": "Queued"
 }
 ```
 

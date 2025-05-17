@@ -4,15 +4,20 @@ using Microsoft.Azure.Functions.Worker;
 using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.DurableTask;
 using Microsoft.DurableTask.Client;
+using Microsoft.DurableTask.Entities;
 using Microsoft.Extensions.Logging;
 
 
 namespace gbelenky.AsyncJob;
 
+// Define the state of the JobEntity
+public record JobEntityState(string ThirdPartyJobId, string JobName);
+
+
 public static class AsyncJob
 {
-    [Function(nameof(AsyncJobOrchestrator))]
-    public static async Task<List<string>> AsyncJobOrchestrator(
+    [Function(nameof(JobStartOrchestrator))] // Renamed
+    public static async Task<List<string>> JobStartOrchestrator( // Renamed
         [OrchestrationTrigger] TaskOrchestrationContext context)
     {
         ILogger logger = context.CreateReplaySafeLogger(nameof(AsyncJob));
@@ -46,55 +51,95 @@ public static class AsyncJob
         return outputs;
     }
 
+    public record StatusPayload(string? JobStatus);
 
-
-
-    // add a function to retuen the status of the job
-    [Function(nameof(AsyncJobStatus))]
-    public static async Task<HttpResponseData> AsyncJobStatus(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "job-status/{jobName}")] HttpRequestData req,
-        [DurableClient] DurableTaskClient client,
-        FunctionContext executionContext, string jobName)
+    [Function(nameof(GetJobStatusActivity))]
+    public static async Task<string> GetJobStatusActivity(
+        [ActivityTrigger] string targetInstanceId,
+        [DurableClient] DurableTaskClient durableTaskClient, // Inject DurableTaskClient
+        FunctionContext executionContext)
     {
-        ILogger logger = executionContext.GetLogger("AsyncJobStatus");
-        string instanceId = $"job-{jobName}";
+        ILogger logger = executionContext.GetLogger(nameof(GetJobStatusActivity));
+        logger.LogInformation("Activity: Attempting to fetch status for instance ID: {TargetInstanceId}", targetInstanceId);
 
-        var host = req.Url.Host;
+        OrchestrationMetadata? instanceMetadata = await durableTaskClient.GetInstanceAsync(targetInstanceId, getInputsAndOutputs: true);
 
-        // Build the Durable Functions status URL correctly using string interpolation
-        string statusUrl = $"{req.Url.Scheme}://{host}:{req.Url.Port}/runtime/webhooks/durabletask/instances/{instanceId}";
-        HttpClient httpClient = new HttpClient();
-        var response = await httpClient.GetAsync(statusUrl);
-        var responseContent = await response.Content.ReadAsStringAsync();
+        if (instanceMetadata == null)
+        {
+            logger.LogWarning("Activity: Instance not found: {TargetInstanceId}", targetInstanceId);
+            return "NotFound";
+        }
+
+        // The custom status is a JToken, deserialize it to string.
+        // Corrected access to custom status via SerializedCustomStatus and ensuring it's not null before deserializing.
         string? customStatus = null;
-        try
+        if (instanceMetadata.SerializedCustomStatus != null)
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(responseContent);
-            if (doc.RootElement.TryGetProperty("customStatus", out var statusProp))
-            {
-                customStatus = statusProp.GetString();
-            }
+            customStatus = System.Text.Json.JsonSerializer.Deserialize<string>(instanceMetadata.SerializedCustomStatus);
         }
-        catch
-        {
-            // Optionally log or handle JSON parse errors
-        }
-        var httpResponse = req.CreateResponse(HttpStatusCode.OK);
-        string json = System.Text.Json.JsonSerializer.Serialize(new { jobStatus = customStatus });
-        logger.LogInformation("Job {JobId} status: {Status}", instanceId, json);
-        await httpResponse.WriteStringAsync(json);
-        return httpResponse;
+
+        logger.LogInformation("Activity: Successfully fetched status for {TargetInstanceId}. Status: '{CustomStatus}'", targetInstanceId, customStatus ?? "null");
+        return customStatus;
     }
 
 
-    [Function("AsyncJobTrigger")]
-    public static async Task<HttpResponseData> AsyncJobTrigger(
+    [Function(nameof(JobStatusOrchestrator))]
+    public static async Task<string> JobStatusOrchestrator(
+        [OrchestrationTrigger] TaskOrchestrationContext context)
+    {
+        string instanceId = context.GetInput<string>() ?? string.Empty;
+        var customStatus = await context.CallActivityAsync<string>(nameof(GetJobStatusActivity), instanceId);
+        return customStatus ?? "Unknown";
+    }
+
+    // add a function to retuen the status of the job
+    [Function(nameof(JobStatusTrigger))] // Renamed
+    public static async Task<HttpResponseData> JobStatusTrigger( // Renamed
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "job-status/{jobName}")] HttpRequestData req,
+        [DurableClient] DurableTaskClient client, // This is the DurableTaskClient
+        FunctionContext executionContext,
+        string jobName)
+    {
+        ILogger logger = executionContext.GetLogger(nameof(JobStatusTrigger));
+        string targetJobInstanceId = $"job-{jobName}"; // Instance ID of the job we want to get status for
+
+        logger.LogInformation("Trigger: Received request to get status for job: {JobName} (Instance ID: {TargetJobInstanceId})", jobName, targetJobInstanceId);
+
+        // Start the orchestrator that will fetch the status.
+        // The input to JobStatusOrchestrator is the instance ID of the job whose status is being queried.
+        string statusQueryOrchestrationId = await client.ScheduleNewOrchestrationInstanceAsync(
+            nameof(JobStatusOrchestrator),
+            targetJobInstanceId);
+
+        logger.LogInformation("Trigger: Started status query orchestration with ID = '{StatusQueryOrchestrationId}' to get status for job '{JobName}'.", statusQueryOrchestrationId, jobName);
+
+        // Wait for the orchestration to complete (timeout after 30 seconds)
+        var timeout = TimeSpan.FromSeconds(30);
+        using var cts = new CancellationTokenSource(timeout);
+        var orchestrationStatus = await client.WaitForInstanceCompletionAsync(statusQueryOrchestrationId, true, cts.Token);
+
+        var response = req.CreateResponse(HttpStatusCode.OK);
+        if (orchestrationStatus == null)
+        {
+            await response.WriteAsJsonAsync(new { status = "Timeout while retrieving job status" });
+            return response;
+        }
+
+        var statusPayload = orchestrationStatus.ReadOutputAs<string>();
+        await response.WriteAsJsonAsync(new {
+            status = statusPayload ?? "Unknown"
+        });
+        return response;
+    }
+
+    [Function("JobStartTrigger")] // Renamed from AsyncJobTrigger
+    public static async Task<HttpResponseData> JobStartTrigger( // Renamed from AsyncJobTrigger
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "job-start/{jobName}")] HttpRequestData req,
         [DurableClient] DurableTaskClient client,
         FunctionContext executionContext, string jobName)
     {
         // The function input comes from the request content.
-        ILogger logger = executionContext.GetLogger("AsyncJobTrigger");
+        ILogger logger = executionContext.GetLogger("JobStartTrigger"); // Updated logger category
         // extract ASYNC_JOB_QUEUED_DURATION_SEC from the environment variable
         double queuedDuration = double.TryParse(
             Environment.GetEnvironmentVariable("ASYNC_JOB_QUEUED_DURATION_SEC"),
@@ -119,7 +164,7 @@ public static class AsyncJob
 
             // Start new orchestration instance, specifying the desired instance ID via options
             await client.ScheduleNewOrchestrationInstanceAsync(
-                nameof(AsyncJobOrchestrator),
+                nameof(JobStartOrchestrator), // Updated to new name
                 orchParams,
                 new StartOrchestrationOptions { InstanceId = instanceId });
             logger.LogInformation("Started orchestration with ID = '{InstanceId}' for job '{JobName}'.", instanceId, jobName);
@@ -139,4 +184,6 @@ public static class AsyncJob
         string ThirdPartyJobId,
         double QueuedDuration,
         double InProgressDuration);
+        
+    
 }
